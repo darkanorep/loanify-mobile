@@ -7,18 +7,27 @@ import { SymbolView } from "expo-symbols";
 import * as WebBrowser from "expo-web-browser";
 import { useState } from "react";
 import {
-    Image,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Image,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from "react-native";
 
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 const GOOGLE_REDIRECT_URI = "loanifymobile://oauth/callback";
+
+async function saveAuthToken(token: string) {
+  if (Platform.OS === "web") {
+    window.sessionStorage.setItem("loanify.auth.token", token);
+    return;
+  }
+
+  await SecureStore.setItemAsync("loanify.auth.token", token);
+}
 
 export default function SignInScreen() {
   const [email, setEmail] = useState("");
@@ -27,17 +36,54 @@ export default function SignInScreen() {
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [message, setMessage] = useState("");
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [loginLoading, setLoginLoading] = useState(false);
 
-  function handleLogin() {
+  async function handleLogin() {
     setMessage("");
 
-    if (!email.trim() || !password) {
-      setMessage("Enter your email and password.");
+    const loginValue = email.trim();
+
+    if (!loginValue || !password) {
+      setMessage("Enter your email or username and password.");
       return;
     }
 
-    // Existing demo sign-in behavior.
-    router.replace("/home");
+    if (!API_BASE_URL) {
+      setMessage("Set EXPO_PUBLIC_API_URL and restart Expo.");
+      return;
+    }
+
+    setLoginLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: loginValue,
+          password,
+        }),
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || typeof data.token !== "string") {
+        throw new Error(data.error ?? "Sign-in failed. Please try again.");
+      }
+
+      await saveAuthToken(data.token);
+      router.replace("/home");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Sign-in failed. Please try again.",
+      );
+    } finally {
+      setLoginLoading(false);
+    }
   }
 
   async function handleGoogleLogin() {
@@ -245,7 +291,9 @@ export default function SignInScreen() {
               ]}
               accessibilityRole="button"
             >
-              <Text style={styles.loginButtonText}>LOG IN</Text>
+              <Text style={styles.loginButtonText}>
+                {loginLoading ? "SIGNING IN…" : "LOG IN"}
+              </Text>
               <SymbolView
                 name="arrow.right"
                 size={19}
